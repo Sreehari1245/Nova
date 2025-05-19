@@ -1,0 +1,443 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fmodern\fcharset0 CourierNewPSMT;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww28300\viewh17140\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs28 \cf0 //parameters\
+\
+F16,_ := ExtensionField<GF(2),x|x^4+x+1>; //this should be the same field as in specs \
+ell := 2; v:= 6; o := 4;\
+n := v+o;\
+\
+//further parameter sets to be added\
+\
+\
+//define S according to p.14 of specs where F16.1 refers to the generator of the group of units in F16\
+case ell:\
+    when 2:\
+        S := Matrix(F16,2,2,[F16.1^3,F16.1^10,F16.1^10,F16.1^5]);\
+    when 3:\
+        S := Matrix(F16,3,3,[F16.1^3,F16.1^10,F16.1^5,F16.1^10,F16.1^5,5,F16.1^5,F16.1^8,F16.1^2]);\
+    when 4: \
+        S := Matrix(F16,4,4,[F16.1^3,F16.1^10,F16.1^5,F16.1^8,F16.1^10,F16.1^5,F16.1^8,F16.1^2,F16.1^5,F16.1^8,F16.1^2,F16.1^4,F16.1^5,F16.1^2,F16.1^4,F16.1^1]);\
+end case;\
+\
+//Algorithms\
+\
+//Algorithm 1 of spec to generate elements of F16[S]\
+//INPUT: tuple of ell elements in F16\
+//OUTPUT: a non-zero element of F16[S]\
+\
+Generate_F16S := function(tuple)\
+    if #tuple ne ell then\
+        error "tuple doesn't have correct number of elements";\
+    else \
+        if tuple[#tuple] eq 0 then\
+            if tuple[1] ne 0 then\
+                tuple[#tuple] := 16 - tuple[1];\
+            else \
+                tuple[#tuple] := 15;\
+            end if;\
+        end if;\
+    end if;\
+    element := tuple[1];\
+    for i in [1..(ell-1)] do\
+        element := element + tuple[i+1]*S^i;\
+    end for;\
+    return element;\
+end function;\
+\
+\
+//Algorithm 2 of spec to generate invertible ell x ell matrices over F16\
+//INPUT: any ell x ell matrix M\
+//OUTPUT: an invertible ell x ell matrix of the form M + a*S for some a in F16\
+\
+Generate_inv_mat := function(M)\
+    if Parent(M) eq Parent(S) then\
+        while Determinant(M) eq 0 do\
+            M := M + S;\
+        end while;\
+        return M;\
+    else\
+        error "input matrix M is not of the same dimensions as S";\
+    end if;\
+end function;\
+\
+//Algorithm 3 to generate T\
+//INPUT: private seed seed_priv and parameters v,o\
+//OUTPUT: v x o matrix T12 with entries in F16S\
+//NOVA uses as hash SHAKE256 (and later AES), we set seed to input of hash functions and then use the pseudorandomness generated to emulate the hash function\
+\
+Generate_T := function(v,o,seed_priv)\
+    SetSeed(seed_priv);\
+    T_F16S_entries := [];\
+    for i in [1..v] do\
+        for j in [1..o] do\
+            S_poly_coeff := [];\
+            for k in [1..ell] do\
+                Append(~S_poly_coeff, Random(F16));\
+            end for;\
+            Append(~T_F16S_entries,Generate_F16S(S_poly_coeff));\
+        end for;\
+    end for;\
+    T := Matrix(Parent(S),v,o,T_F16S_entries);\
+    return T;\
+end function;\
+\
+//Algorithm 4 to generate random part of public key\
+//INPUT: parameters v,o,ell and public seed seed_pub\
+//OUTPUT: matrices A_alpha, B_alpha, Q_alpha1 and Q_alpha2 for 1 leq alpha leq ell^2 and the entries P_i11,P_i12,P_i21 for 1 leq i leq m\
+//As before use instead of AES hash instead magma pseudorandomness seeded with seed_pub\
+\
+Generate_randompart_pubkey := function(v,o,m,seed_pub)\
+    SetSeed(seed_pub);\
+    //Generate matrices P11_i, P12_i, P21 of dimensions vxv, vxo, oxv over F16\
+    P11_matrices := [];\
+    P12_matrices := [];\
+    P21_matrices := [];\
+    A_matrices := [];\
+    B_matrices := [];\
+    Qi1_matrices := [];\
+    Qi2_matrices := [];\
+    for i in [1..m] do\
+        Append(~P11_matrices, RandomMatrix(Parent(S),v,v));\
+        Append(~P12_matrices, RandomMatrix(Parent(S),v,o));\
+        Append(~P21_matrices, RandomMatrix(Parent(S),o,v));\
+    end for;\
+    //matrices A_i, B_i ell x ell matrices over F16\
+    for i in [1..ell^2] do\
+        Append(~A_matrices, ScalarMatrix(F16, ell, 1));\
+        Append(~B_matrices, ScalarMatrix(F16, ell, 1));\
+    end for;\
+    //matrices Qi1 and Qi2 are ell x ell matrices over F16 in F16S\
+    for i in [1..m] do\
+        S_poly_coeff_1 := [];\
+        S_poly_coeff_2 := [];\
+        for k in [1..ell] do\
+            Append(~S_poly_coeff_1, Random(F16));\
+            Append(~S_poly_coeff_2, Random(F16));\
+        end for;\
+        Append(~Qi1_matrices,Generate_inv_mat(Generate_F16S(S_poly_coeff_1)));\
+        Append(~Qi2_matrices,Generate_inv_mat(Generate_F16S(S_poly_coeff_2)));\
+    end for;\
+    return A_matrices, B_matrices, Qi1_matrices, Qi2_matrices, P11_matrices, P12_matrices, P21_matrices;\
+end function;\
+\
+\
+//Algorithm 5 to generate public key\
+//INPUT: parameters v,o,ell, public seed seed_pub and private seed seed_priv\
+//OUTPUT: public key (seed_pub, P_i^(22) for 1 leq i leq m)\
+\
+PubGen := function(v,o,seed_pub,seed_priv)\
+    T12 := Generate_T(v,o,seed_priv);\
+    m := o;\
+    _,_,_,_,P11_matrices,P12_matrices,P21_matrices := Generate_randompart_pubkey(v,o,m,seed_pub);\
+    P22_matrices := [];\
+    for i in [1..m] do\
+        P22_matrix := Transpose(T12)*(P11_matrices[i]*T12 + P12_matrices[i]) + P21_matrices[i]*T12;\
+        Append(~P22_matrices,P22_matrix);\
+    end for;\
+    return seed_pub, P22_matrices;\
+end function;\
+\
+\
+//Algorithm 6 to generate private key\
+//INPUT: parameters v,o,ell, public seed seed_pub and private seed seed_priv\
+//OUTPUT: private key (T12, F11_i, F12_i, F21_i for i in [1..m]\
+\
+PrivGen := function(v,o,seed_pub,seed_priv)\
+    T12 := Generate_T(v,o,seed_priv);\
+    m := o;\
+    _,_,_,_,P11_matrices,P12_matrices,P21_matrices := Generate_randompart_pubkey(v,o,m,seed_pub);\
+    F11_matrices := [];\
+    F12_matrices := [];\
+    F21_matrices := [];\
+    for i in [1..m] do\
+        F11_matrices[i] := P11_matrices[i];\
+        F12_matrices[i] := P11_matrices[i]*T12+P12_matrices[i];\
+        F21_matrices[i] := Transpose(T12)*P11_matrices[i] + P21_matrices[i];\
+    end for;\
+    return T12, F11_matrices, F12_matrices, F21_matrices;\
+end function;\
+\
+//Algorithm 7 to assign vinegar variables\
+//INPUT: parameters v,o,ell, private seed seed_priv and message digest/salt/num_sig . For simplicity we just use setseed for sum of seed_priv and digest and num_sig (clearly not secure)\
+//OUTPUT: vinegar values X1,...Xv\
+\
+Assign_vinegar := function(v,seed_priv,digest,num_sig)\
+    SetSeed(seed_priv+digest+num_sig);\
+    vinegar_variables := RandomMatrix(Parent(S),1,v);\
+    return vinegar_variables;\
+end function;\
+\
+//Algorithm 8 to compute vinegar part of central map\
+//INPUT:private key F11_matrices, public key A_matrices, B_matrices, Qi1_matrices, Qi2_matrices and first v vinegar variables\
+//OUTPUT: vinegar part Fi_VV for 1 leq i leq m\
+Compute_vinegar := function(v,o,F11_matrices,A_matrices,B_matrices,Qi1_matrices,Qi2_matrices,vinegar_variables)\
+    Left := [];\
+    Right := [];\
+    for alpha in [1..ell^2] do\
+        Append(~Left,[]);\
+        Append(~Right,[]);\
+        for j in [1..v] do\
+            Left[alpha][j] := A_matrices[alpha]*Transpose(vinegar_variables[1][j])*Qi1_matrices[alpha];\
+            Right[alpha][j] := Qi2_matrices[alpha]*vinegar_variables[1][j]*B_matrices[alpha];\
+        end for;\
+    end for;\
+    m := o;\
+    F_VV := [];\
+    for i in [1..m] do\
+        F_VV[i] := Parent(S)!0;\
+        for alpha in [1..ell^2] do\
+            for j in [1..v] do\
+                for k in [1..v] do\
+                    F_VV[i] := F_VV[i] + Left[alpha][j]*F11_matrices[i][j][k]*Right[alpha][k];\
+                end for;\
+            end for;\
+        end for;\
+    end for;\
+    return F_VV;\
+end function;\
+\
+\
+//Algorithm 9 to compute the coefficient matrix of the oil variable\
+//INPUT: parameters v,o,ell, private key (F12_matrices[i], F21_matrices[i]), public key (A_matrices, B_matrices, Qi1_matrices, Qi2_matrices), vinegar_variables,\
+//        and k the index of the oil variable where 1 leq k leq 0\
+//OUTPUT: coefficient matrix M_ik\
+Compute_oil_coeff_mat := function(v,o,F12_matrices_i,F21_matrices_i,A_matrices,B_matrices,Qi1_matrices,Qi2_matrices,vinegar_variables,k)\
+    Left := [];\
+    Right := [];\
+    for alpha in [1..ell^2] do\
+        Append(~Left,[]);\
+        Append(~Right,[]);\
+        for j in [1..v] do\
+            Left[alpha][j] := A_matrices[alpha]*Transpose(vinegar_variables[1][j])*Qi1_matrices[alpha];\
+            Right[alpha][j] := Qi2_matrices[alpha]*vinegar_variables[1][j]*B_matrices[alpha];\
+        end for;\
+    end for;\
+    M_ik := ZeroMatrix(F16,ell^2,ell^2);\
+    for alpha in [1..ell^2] do\
+        for j in [1..v] do\
+            LeftXk := Left[alpha][j]*F12_matrices_i[j][k]*Qi2_matrices[alpha];\
+            RightXk := B_matrices[alpha];\
+            for ti in [1..ell^2] do\
+                for tj in [1..ell^2] do\
+                    M_ik[ti][tj] := M_ik[ti][tj] + LeftXk[(ti-1) div ell + 1][(tj-1) div ell + 1]*RightXk[(tj - 1) mod ell + 1][(ti - 1) mod ell + 1];\
+                end for;\
+            end for;\
+        end for;\
+    end for;\
+    for alpha in [1..ell^2] do\
+        for j in [1..v] do\
+            LeftXk := A_matrices[alpha];\
+            RightXk := Qi1_matrices[alpha]*F21_matrices_i[k][j]*Right[alpha][j];\
+            for ti in [1..ell^2] do\
+                for tj in [1..ell^2] do\
+                    M_ik[ti][tj] := M_ik[ti][tj] + LeftXk[(ti - 1) div ell + 1][(tj - 1) mod ell + 1]*RightXk[(tj - 1) div ell + 1][(ti - 1) mod ell + 1];\
+                end for;\
+            end for;\
+        end for;\
+    end for;\
+    return M_ik;\
+end function;\
+\
+//Algorithm 10 to build augmented matrix of system\
+//INPUT: parameters v,o,ell, vinegar values F_VV_i for 1 leq i leq v, coefficient matrices M_ik for 1 leq i leq v and 1 leq k leq o, digest, public seed seed_pub\
+//OUTPUT: augmented matrix G\
+Augmented_Matrix := function(v,o,F_VV,M_ik_matrices,digest,seed_pub)\
+    m := o;\
+    G := ZeroMatrix(F16,m*ell^2,m*ell^2+1);\
+    SetSeed(seed_pub+digest); //as before just for demonstration purposes we take the sum as seed instead of hashing concatenation of seed and digest\
+    for i in [1..(m*ell^2)] do\
+        G[i][m*ell^2+1] := Random(F16);\
+    end for;\
+\
+    for i in [0..(m-1)] do\
+        for j in [0..(ell-1)] do\
+            for k in [0..(ell-1)] do\
+                G[i*ell^2+j*ell+k+1][m*ell^2+1] := G[i*ell^2 + j*ell +k +1][m*ell^2+1] + F_VV[i+1][j+1][k+1];\
+            end for;\
+        end for;\
+    end for;\
+    for i in [0..(m-1)] do\
+        for k in [0..(m-1)] do\
+            for ti in [1..(ell^2)] do\
+                for tj in [1..(ell^2)] do\
+                    G[i*ell^2 + ti][k*ell^2 + tj] := M_ik_matrices[i+1][k+1][ti][tj];\
+                end for;\
+            end for;\
+        end for;\
+    end for;\
+    return G;\
+end function;\
+\
+//Algorithm 11 to sign\
+//INPUT: parameters v,o,ell, seeds seed_pub and seed_priv, digest\
+//OUTPUT: signature sig\
+Sign := function(v,o,seed_pub,seed_priv,digest)\
+    m := o;\
+    A_matrices, B_matrices, Qi1_matrices, Qi2_matrices, P11_matrices, P12_matrices, P21_matrices := Generate_randompart_pubkey(v,o,m,seed_pub);\
+    T12, F11_matrices, F12_matrices, F21_matrices := PrivGen(v,o,seed_pub,seed_priv);\
+    T := ZeroMatrix(Parent(S),v+o, v+o);\
+    InsertBlock(~T,T12,1,v+1);\
+    for i in [1..v+o] do\
+        T[i][i] := Parent(S)!1;\
+    end for;\
+\
+    num_sig := 0;\
+    repeat\
+        num_sig +:= 1;\
+        assigned_vinegar_var := Assign_vinegar(v,seed_priv,digest,num_sig);\
+        F_VV := Compute_vinegar(v,o,F11_matrices,A_matrices,B_matrices,Qi1_matrices,Qi2_matrices,assigned_vinegar_var);\
+        M_ik_matrices := [];\
+        for i in [1..m] do\
+            Append(~M_ik_matrices,[]);\
+            for k in [1..o] do\
+                Append(~M_ik_matrices[i],Compute_oil_coeff_mat(v,o,F12_matrices[i],F21_matrices[i],A_matrices,B_matrices,Qi1_matrices,Qi2_matrices,assigned_vinegar_var,k));\
+            end for;\
+        end for;\
+        G := Augmented_Matrix(v,o,F_VV,M_ik_matrices,digest,seed_pub);\
+        G_echelon := EchelonForm(G);\
+        flag_redo := false;\
+        for i in [1..(o*ell^2)] do\
+            if G_echelon[i][i] eq 0 then\
+                flag_redo := true;\
+                break i;\
+            end if;\
+        end for;\
+        if flag_redo eq false then\
+            G := G_echelon;\
+            i := m*ell^2;\
+            sol := [];\
+            while i ge 1 do\
+                t := 0;\
+                for k in [(i+1)..(m*ell^2)] do\
+                    t := t + G[i][k]*sol[k];\
+                end for;\
+                sol[i] := G[i][m*ell^2+1] + t;\
+                i -:= 1;\
+            end while;\
+            \
+            sol, ker := Solution(Transpose(ColumnSubmatrix(G,o*ell^2)),Transpose(ColumnSubmatrix(G,o*ell^2+1,1))); \
+            \
+            oil_var := &cat[[Parent(S)!0] : i in [1..o]];\
+            for index in [0..(o-1)] do\
+                for i in [0..(ell-1)] do\
+                    for j in [0..(ell-1)] do\
+                        oil_var[index+1][i+1][j+1] := sol[1][index*ell^2+i*ell+j+1];\
+                    end for;\
+                end for;\
+            end for;\
+            oil_var := Matrix(Parent(S),1,o,oil_var);\
+\
+            X_vars := HorizontalJoin(assigned_vinegar_var,oil_var);\
+            sig := T*Transpose(X_vars);\
+            return sig;\
+        end if;\
+    until flag_redo eq false;\
+end function;\
+\
+//Algorithm 12 to evaluate the public map\
+//INPUT: parameters v,o,ell, public key (A_matrices, B_matrices, Qi1_matrices, Qi2_matrices) and public map (P11_matrices,P12_matrices,P21_matrices,P22_matrices), and the signature sig\
+//OUTPUT: evaluation hash_sig of P at sig\
+Evaluate_public_map := function(v,o,A_matrices,B_matrices,Qi1_matrices,Qi2_matrices,P11_matrices,P12_matrices,P21_matrices,P22_matrices,sig)\
+    m := o;\
+    Left := [];\
+    Right := [];\
+    for alpha in [1..ell^2] do //Specs say [1..m] but should be ell^2, probably typo?\
+        Append(~Left,[]);\
+        Append(~Right,[]);\
+        for j in [1..(v+o)] do\
+            Left[alpha][j] := A_matrices[alpha]*Transpose(sig[j][1])*Qi1_matrices[alpha];\
+            Right[alpha][j] := Qi2_matrices[alpha]*sig[j][1]*B_matrices[alpha];\
+        end for;\
+    end for;\
+    hash_sig := ZeroMatrix(Parent(S),m,1);\
+    for alpha in [1..ell^2] do\
+        for i in [1..m] do\
+            for dj in [1..v] do\
+                for dk in [1..v] do\
+                    hash_sig[i][1] := hash_sig[i][1] + Left[alpha][dj]*P11_matrices[i][dj][dk]*Right[alpha][dk];\
+                end for;\
+            end for;\
+            for dj in [1..v] do\
+                for dk in [1..o] do\
+                    hash_sig[i][1] := hash_sig[i][1] + Left[alpha][dj]*P12_matrices[i][dj][dk]*Right[alpha][v+dk];\
+                end for;\
+            end for;\
+            for dj in [1..o] do\
+                for dk in [1..v] do\
+                    hash_sig[i][1] := hash_sig[i][1] + Left[alpha][v+dj]*P21_matrices[i][dj][dk]*Right[alpha][dk];\
+                end for;\
+            end for;\
+            for dj in [1..o] do\
+                for dk in [1..o] do\
+                    hash_sig[i][1] := hash_sig[i][1] + Left[alpha][v+dj]*P22_matrices[i][dj][dk]*Right[alpha][v+dk];\
+                end for;\
+            end for;\
+        end for;\
+    end for;\
+    return hash_sig;\
+end function;\
+\
+\
+\
+//Algorithm 13 to verify signatures\
+//INPUT: parameters v,o,ell, public key (seed_pub, P22_matrices, digest)\
+//OUTPUT: accept or reject\
+Verify := function(v,o,ell,seed_pub,P22_matrices,digest,sig) //in spec signature is missing?\
+    m := o;\
+    A_matrices,B_matrices,Qi1_matrices,Qi2_matrices, P11_matrices, P12_matrices, P21_matrices := Generate_randompart_pubkey(v,o,m,seed_pub);\
+    SetSeed(seed_pub+digest); //generates hash_d from the same seed as the last column of G was generated\
+    hash_d := [];\
+    for i in [1..(m*ell^2)] do\
+        hash_d[i] := Random(F16);\
+    end for;\
+\
+    hash_sig := Evaluate_public_map(v,o,A_matrices,B_matrices,Qi1_matrices,Qi2_matrices,P11_matrices,P12_matrices,P21_matrices,P22_matrices,sig);\
+\
+    //hash_sig has elements in R, so map hash_d elements from F16 into R as in Alg. 11\
+    hash_d_R := &cat[[Parent(S)!0] : i in [1..m]];\
+    for index in [0..(m-1)] do\
+        for i in [0..(ell-1)] do\
+            for j in [0..(ell-1)] do\
+                hash_d_R[index+1][i+1][j+1] := hash_d[index*ell^2+i*ell+j+1];\
+            end for;\
+        end for;\
+    end for;\
+    hash_d_R := Matrix(Parent(S),m,1,hash_d_R);\
+\
+    //hash_d_R;\
+    //hash_sig;\
+    if hash_d_R eq hash_sig then\
+        return true, "accept signature";\
+    else   \
+        return false, "reject signature", hash_d_R, hash_sig;\
+    end if;\
+end function;\
+\
+\
+//TEST\
+seed_priv := 0;\
+seed_pub := 0;\
+digest := 0;\
+\
+//Generate Keys\
+m := o;\
+A_matrices,B_matrices,Qi1_matrices,Qi2_matrices, P11_matrices, P12_matrices, P21_matrices := Generate_randompart_pubkey(v,o,m,seed_pub); //generate random part of pubkey\
+seed_pub, P22_matrices := PubGen(v,o,seed_pub,seed_priv); //public key\
+T12, F11_matrices, F12_matrices, F21_matrices := PrivGen(v,o,seed_pub,seed_priv); //private key\
+\
+//Generate Signature\
+signature := Sign(v,o,seed_pub,seed_priv,digest);\
+\
+\
+//Verify Signature\
+Verify(v,o,ell,seed_pub,P22_matrices,digest,signature);\
+\
+\
+\
+\
+}
