@@ -4,14 +4,17 @@ Overview:
 
 NOVA is a Unbalanced Oil and Vinegar (UOV) scheme enhanced with certain structural components to improve efficiency and compactness. This MAGMA implementation covers:
 
-Parameter setup: Finite field extension and matrix definitions
-Key generation: public and private
-Signature generation and verification
-Internal cryptographic transformations (hash emulation via randomness, central map evaluation, etc.)
+1. Parameter setup: Finite field extension and matrix definitions
+2. Key generation: public and private
+3. Signature generation and verification
+4. Internal cryptographic transformations (hash emulation via randomness, central map evaluation, etc.)
 
 We implements all the core algorithms from the NOVA specification https://snova.pqclab.org/#page-resources
 
-Supports different parameter sets (ell, v, o) — currently hardcoded for ell = 2, v = 6, o = 4
+Our code supports different parameter sets (ell, v, o) — currently hardcoded for ell = 2, v = 6, o = 4
+
 Uses MAGMA’s pseudorandom number generation to emulate SHAKE256/AES for testing purposes
+
 Modular and readable design
+
 
